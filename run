@@ -1,0 +1,58 @@
+#!/bin/bash
+
+function help {
+  echo "$(basename "$0") - Run privateGPT
+  OPTIONS:
+    -h display this help information
+    -v show all messages
+
+  If you want to monitor your GPU activity, run one of the following:
+    nvtop
+    watch -d gpustat
+  "
+  exit 1
+}
+
+cd "$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )" || exit
+
+# Disable any activated virtual environment
+# See https://mslinn.com/blog/2021/04/09/python-venvs.html#pvenv
+VENV="$( dirname "$( which virtualenv)" )"
+if [ ! "$VENV" == /usr/bin ]; then source "$VENV/activate" && deactivate 2>/; fi
+
+# export PGPT_PROFILES=local,logger
+export PGPT_PROFILES=local
+
+unset HIDDEN VERBOSE
+if [ "$1" == -v ]; then VERBOSE=true; shift; fi
+if [ "$1" == -h ]; then help; fi
+
+echo "privateGPT serving on http://localhost:8001 (Press CTRL+C to quit)"
+if [ "$VERBOSE" ]; then
+  poetry run python -m private_gpt
+else
+  export UVICORN_LOG_LEVEL=WARN
+  # Set up filter for grep to suppress noisy stderr
+  for X in 'Initializing the LLM in mode=local' \
+           'Initializing the embedding model in mode=' \
+           llama_index.indices.loading \
+           'llama_new_context_with_model\:' \
+           'llama_build_graph\:' \
+           'llm_load_print_meta\:' \
+           'llm_load_tensors\:' \
+           'llm_load_vocab\:' \
+           'llama_model_loader\:' \
+           'Mounting the gradio UI, at path=' \
+           uvicorn.access \
+           uvicorn.error; do
+    if [ "$HIDDEN" ]; then
+      HIDDEN="$HIDDEN\|$X"
+    else
+      HIDDEN="$X"
+    fi
+  done
+  # echo "$HIDDEN"
+  SUPPRESS_WARNINGS=-Wignore
+  poetry run python $SUPPRESS_WARNINGS -m private_gpt 2> >(grep -v "$HIDDEN")
+fi
+
